@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+
+
+# Options defaults
+
+content_selector='div.wiki-content'
+title_selector='h1 a'
+is_auto=0
+pandoc_options='--atx-headers'
+curl_options='--silent'
+
+
+function show_help() {
+  readonly HELP="
+NAME
+    webpage2md - convert a web page to markdown
+
+SYNOPSIS
+    webpage2md [options] <URL>
+
+DESCRIPTION
+    webpage2md fetches a web page, specified by <URL>. It picks one element
+    within the page and converts the inner HTML to markdown. Then it writes the
+    resulting markdown to stout (or optionally to an auto-named file).
+
+OPTIONS
+    -a, --auto
+        Automatically write results to a file with a file-name based on the
+        title from the page. If this option is not given, markdown is written
+        to stdout.
+
+    -c, --content <element>
+        What HTML element within the wiki page do we use to find the content
+        for the markdown we want? Specify <element> using a CSS selector. The
+        inner HTML of this element will be used.
+        Default: '$content_selector'
+
+    -h, --help
+        Show this help message
+
+    -p, --pandoc-options <options>
+        Options to pass to the pandoc program when converting the page
+        Default: '$pandoc_options'
+
+    -r, --curl-options <options>
+        Options to pass to the curl program when downloading the page
+        Default: '$curl_options'
+
+    -t, --title <element>
+        What HTML element within the wiki page do we use to find the page
+        title? Specify <element> using a CSS selector. The inner HTML of this
+        element will be used.
+        Default: '$title_selector'
+
+REQUIREMENTS
+    • pandoc - http://pandoc.org/installing.html
+    • html-xml-utils - https://www.w3.org/Tools/HTML-XML-utils/README
+    • curl
+
+EXIT STATUS
+    0   Success
+    1   Content element not found in page
+    2   Problem running pandoc
+    4   Problem fetching <URL> with curl
+    5   Problem running an html-xml-utils tool
+    9   Other
+"
+  echo "$HELP"
+  exit 0
+}
+
+function exit_content_element_missing() {
+  (>&2 echo "$@")
+  (>&2 echo "Content element not found in page")
+  exit 1
+}
+
+function exit_pandoc_problem() {
+  (>&2 echo "$@")
+  (>&2 echo "Could not run pandoc. Make sure it is installed.
+    See: http://pandoc.org/installing.html")
+  exit 2
+}
+
+function exit_curl_problem() {
+  (>&2 echo "$@")
+  (>&2 echo "Could not run curl. Make sure it is installed.")
+  exit 4
+}
+
+function exit_html_xml_utils() {
+  (>&2 echo "$@")
+  (>&2 echo "Make sure html-xml-utils is installed.")
+  exit 5
+}
+
+function exit_other() {
+  (>&2 echo "$@")
+  exit 9
+}
+
+# Parse options
+while [[ $# -gt 1 ]] ; do
+  key="$1"
+  case $key in
+    -a|--auto)
+      is_auto=1
+      ;;
+    -c|--content)
+      content_selector="$2"
+      shift
+      ;;
+    -p|--pandoc-options)
+      pandoc_options="$2"
+      shift
+      ;;
+    -r|--curl-options)
+      curl_options="$2"
+      shift
+      ;;
+    -t|--title)
+      title_selector="$2"
+      shift
+      ;;
+    *)
+       # unknown options
+    ;;
+  esac
+  shift
+done
+if [ $# -eq 0 ] || [ $@ = "-h" ] || [ $@ = "help" ] || [ $@ = "--help" ]; then
+    show_help
+fi
+url=$@
+
+
+# get web page
+html=$(curl $curl_options $url ) || \
+  exit_curl_problem
+
+
+# normalize web page HTML
+html=$(echo "$html" | hxnormalize -l 240 -x ) || \
+  exit_html_xml_utils "error running hxnormalize"
+
+
+# Extract page title
+title=$(echo "$html" | hxselect -c "$title_selector" ) || \
+  exit_html_xml_utils "error selecting title with hxselect"
+
+
+# Extract page content
+content=$(echo "$html" | hxselect -c "$content_selector" ) || \
+  exit_html_xml_utils "error selecting content with hxselect"
+if [[ -z "${content// }" ]]; then
+  exit_content_element_missing
+fi
+
+
+# Generate markdown
+markdown=$(echo "$content" | pandoc -f html -t markdown $pandoc_options ) || \
+  exit_pandoc_problem
+
+
+# Add page title to beginning of markdown
+if [[ $title = *[![:space:]]* ]]; then
+   markdown=$(echo -e "# ${title}\n\n${markdown}")
+fi
+
+
+# clean up markdown
+readonly NBSP='\xC2\xA0'
+markdown=$(echo "$markdown" | \
+  # remove header attribs like {#this}
+    sed -r 's|^(#{1,6}.*?) *\{#.*\}$|\1|g' | \
+  # convert non-breaking spaces to spaces
+    sed -r "s|$NBSP| |g" | \
+  # remove trailing whitespace
+    sed -r 's|[[:space:]]*$||g'
+  ) || exit_other "unable to clean up markdown with sed"
+
+
+# Output
+if [ $is_auto -eq 1 ]; then
+  # formulate file name
+  file_name=$(echo "$title" | \
+    # only ascii characters
+      iconv -f utf-8 -t ascii//translit | \
+    # conver to lowercase
+      tr '[:upper:]' '[:lower:]' | \
+    # convert spaces and underscores to dashes
+      sed 's|[ _]|-|g' | \
+    # keep only letters, numbers, dashes
+      sed -r 's|[^0-9a-zA-Z-]||g' )
+  # write
+  echo "$markdown" > "$file_name.md"
+else
+  # send to stdout
+  echo "$markdown"
+fi
+
