@@ -55,6 +55,9 @@ OPTIONS
         element will be used.
         Default: '$title_selector'
 
+REPOSITORY
+    https://github.com/seanmadsen/webpage2md
+
 REQUIREMENTS
     • pandoc - http://pandoc.org/installing.html
     • html-xml-utils - https://www.w3.org/Tools/HTML-XML-utils/README
