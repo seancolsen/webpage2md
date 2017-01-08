@@ -160,6 +160,14 @@ if [[ -z "${content// }" ]]; then
 fi
 
 
+# Within page content, convert code blocks within <script> tags into <pre> tags
+content=$(echo "$content" | perl -0777 -pe 's|
+  <script.*?type="syntaxhighlighter".*?><!\[CDATA\[    # script open tag
+  (.*?)                                                # content
+  \]\]></script>                                       # script close tag
+  |<pre>$1</pre>|gsx' )
+
+
 # Generate markdown
 markdown=$(echo "$content" | pandoc -f html -t markdown $pandoc_options ) || \
   exit_pandoc_problem
