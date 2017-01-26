@@ -22,9 +22,12 @@ SYNOPSIS
     webpage2md [options] <URL>
 
 DESCRIPTION
-    webpage2md fetches a web page, specified by <URL>. It picks one element
-    within the page and converts the inner HTML to markdown. Then it writes the
-    resulting markdown to stout (or optionally to an auto-named file).
+    webpage2md fetches a web page, specified by <URL>. If <URL> begins with
+    'https://' or 'http://' then the web page will be downloaded from the
+    Internet. If not, <URL> will be used to search for an HTML file locally.
+    From the resulting HTML, webpage2md picks one element within the page and
+    converts the inner HTML to markdown. Then it writes the resulting markdown
+    to stout (or optionally to an auto-named file).
 
 OPTIONS
     -a, --auto
@@ -69,6 +72,7 @@ EXIT STATUS
     2   Problem running pandoc
     4   Problem fetching <URL> with curl
     5   Problem running an html-xml-utils tool
+    6   HTML file not found locally
     9   Other
 "
   echo "$HELP"
@@ -98,6 +102,13 @@ function exit_html_xml_utils() {
   (>&2 echo "$@")
   (>&2 echo "Make sure html-xml-utils is installed.")
   exit 5
+}
+
+function exit_html_file_not_found {
+  (>&2 echo \
+  "You specified the following HTML file which could not be found locally
+  $@")
+  exit 6
 }
 
 function exit_other() {
@@ -141,9 +152,11 @@ url=$@
 
 
 # get web page
-html=$(curl $curl_options $url ) || \
-  exit_curl_problem
-
+if [[ "$url" =~ ^https?:// ]]; then
+  html=$(curl $curl_options "$url" ) || exit_curl_problem
+else
+  html=$(cat "$url") || exit_html_file_not_found "$url"
+fi
 
 # normalize web page HTML
 html=$(echo "$html" | hxnormalize -l 240 -x ) || \
