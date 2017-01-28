@@ -184,6 +184,22 @@ content=$(echo "$content" | perl -0777 -pe 's|
   |<pre>$1</pre>|gsx' )
 
 
+# Prepare HTML for easier processing of admonitions in markdown later by
+# changing these image paths to all be the same length
+content=$(echo "$content" | perl -0777 -pe 's
+  @\/confluence\/images\/icons\/emoticons\/information\.png
+  @/confluence/images/icons/emoticons/info.png@gx' )
+content=$(echo "$content" | perl -0777 -pe 's
+  @\/confluence\/images\/icons\/emoticons\/check\.png
+  @/confluence/images/icons/emoticons/chec.png@gx' )
+content=$(echo "$content" | perl -0777 -pe 's
+  @\/confluence\/images\/icons\/emoticons\/warning\.png
+  @/confluence/images/icons/emoticons/warn.png@gx' )
+content=$(echo "$content" | perl -0777 -pe 's
+  @\/confluence\/images\/icons\/emoticons\/forbidden\.png
+  @/confluence/images/icons/emoticons/forb.png@gx' )
+
+
 # Generate markdown
 markdown=$(echo "$content" | pandoc -f html -t markdown $pandoc_options ) || \
   exit_pandoc_problem
@@ -205,6 +221,60 @@ markdown=$(echo "$markdown" | \
   # remove trailing whitespace
     sed -r 's|[[:space:]]*$||g'
   ) || exit_other "unable to clean up markdown with sed"
+
+
+
+# convert wiki admonitions to markdown admonitions...
+
+# Admonitions:
+# When an admonition doesn't have a title, move its first line of
+# content down and out of the place where we expect the title to appear
+markdown=$(echo "$markdown" | perl -0777 -pe 's@
+    (\x20+-{20,}\x20-{10,})\n
+    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (info|warn|chec|forb)\.png\)
+      )\x20\x20\x20
+    ([^*\\\n]+)\\?\n
+    ((.|\n)*?)
+    (\x20+-{20,}\x20-{10,})
+  @$1\n$2\n    $4\n$5$7@gmx' )
+
+# Admonitions:
+# Prepare content inside of admonitions.
+# Remove all occurrences of exactly 53 spaces at the beginning of the line
+# and replace with 4 spaces
+markdown=$(echo "$markdown" | perl -0777 -pe 's@^ {53}@    @gm' )
+
+# Admonitions:
+# Convert admonitions to MkDocs syntax, when titles are present
+markdown=$(echo "$markdown" | perl -0777 -pe 's@
+    (\x20+-{20,}\x20-{10,})\n
+    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (info|warn|chec|forb)\.png\)
+      )\x20\x20\x20
+    \*\*([^*]*)\*\*\\\n
+    ((.|\n)*?)
+    (\x20+-{20,}\x20-{10,})
+  @!!! $3 "$4"\n$5@gmx' )
+
+# Admonitions:
+# Convert admonitions to MkDocs syntax, when titles are NOT present
+markdown=$(echo "$markdown" | perl -0777 -pe 's@
+    (\x20+-{20,}\x20-{10,})\n
+    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (info|warn|chec|forb)\.png\)
+      )
+    ((.|\n)*?)
+    (\x20+-{20,}\x20-{10,})
+  @!!! $3$4@gmx' )
+
+# Admonitions:
+# change keywords to MkDocs keywords
+markdown=$(echo "$markdown" | \
+  sed -r 's@^!!! info@!!! note@g' | \
+  sed -r 's@^!!! chec@!!! tip@g' | \
+  sed -r 's@^!!! warn@!!! warning@g' | \
+  sed -r 's@^!!! forb@!!! danger@g' )
 
 
 # Output
