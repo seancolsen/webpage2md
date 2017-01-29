@@ -211,6 +211,13 @@ if [[ $title = *[![:space:]]* ]]; then
 fi
 
 
+# un-escape characters escaped by confluence wiki
+confluence_indicator='<meta [^>]*id="confluence-base-url"'
+if [[ "$html" =~ $confluence_indicator ]]; then
+  markdown=$(echo "$markdown" | sed -r 's@\\([`~#$^*_<>])@\1@g' )
+fi
+
+
 # clean up markdown
 readonly NBSP='\xC2\xA0'
 markdown=$(echo "$markdown" | \
