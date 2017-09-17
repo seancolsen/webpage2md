@@ -9,7 +9,6 @@ set -u
 content_selector='div.wiki-content'
 title_selector='h1 a'
 is_auto=0
-pandoc_options='--atx-headers'
 curl_options='--silent'
 
 
@@ -44,10 +43,6 @@ OPTIONS
     -h, --help
         Show this help message
 
-    -p, --pandoc-options <options>
-        Options to pass to the pandoc program when converting the page
-        Default: '$pandoc_options'
-
     -r, --curl-options <options>
         Options to pass to the curl program when downloading the page
         Default: '$curl_options'
@@ -62,14 +57,14 @@ REPOSITORY
     https://github.com/seanmadsen/webpage2md
 
 REQUIREMENTS
-    • pandoc - http://pandoc.org/installing.html
+    • reverse_markdown - https://github.com/xijo/reverse_markdown
     • html-xml-utils - https://www.w3.org/Tools/HTML-XML-utils/README
     • curl
 
 EXIT STATUS
     0   Success
     1   Content element not found in page
-    2   Problem running pandoc
+    2   Problem running reverse_markdown
     4   Problem fetching <URL> with curl
     5   Problem running an html-xml-utils tool
     6   HTML file not found locally
@@ -85,10 +80,10 @@ function exit_content_element_missing() {
   exit 1
 }
 
-function exit_pandoc_problem() {
+function exit_reverse_markdown_problem() {
   (>&2 echo "$@")
-  (>&2 echo "Could not run pandoc. Make sure it is installed.
-    See: http://pandoc.org/installing.html")
+  (>&2 echo "Could not run reverse_markdown. Make sure it is installed.
+    See: https://github.com/xijo/reverse_markdown")
   exit 2
 }
 
@@ -125,10 +120,6 @@ while [[ $# -gt 1 ]] ; do
       ;;
     -c|--content)
       content_selector="$2"
-      shift
-      ;;
-    -p|--pandoc-options)
-      pandoc_options="$2"
       shift
       ;;
     -r|--curl-options)
@@ -184,25 +175,9 @@ content=$(echo "$content" | perl -0777 -pe 's|
   |<pre>$1</pre>|gsx' )
 
 
-# Prepare HTML for easier processing of admonitions in markdown later by
-# changing these image paths to all be the same length
-content=$(echo "$content" | perl -0777 -pe 's
-  @\/confluence\/images\/icons\/emoticons\/information\.png
-  @/confluence/images/icons/emoticons/info.png@gx' )
-content=$(echo "$content" | perl -0777 -pe 's
-  @\/confluence\/images\/icons\/emoticons\/check\.png
-  @/confluence/images/icons/emoticons/chec.png@gx' )
-content=$(echo "$content" | perl -0777 -pe 's
-  @\/confluence\/images\/icons\/emoticons\/warning\.png
-  @/confluence/images/icons/emoticons/warn.png@gx' )
-content=$(echo "$content" | perl -0777 -pe 's
-  @\/confluence\/images\/icons\/emoticons\/forbidden\.png
-  @/confluence/images/icons/emoticons/forb.png@gx' )
-
-
 # Generate markdown
-markdown=$(echo "$content" | pandoc -f html -t markdown $pandoc_options ) || \
-  exit_pandoc_problem
+markdown=$(echo "$content" | reverse_markdown ) || \
+  exit_reverse_markdown_problem
 
 
 # Add page title to beginning of markdown
@@ -218,6 +193,18 @@ if [[ "$html" =~ $confluence_indicator ]]; then
 fi
 
 
+# Fix list indentation to use 4 spaces
+markdown=$(echo "$markdown" | perl -0777 -pe \
+  's@^(\s+)(?=(- |\d+\. ))@$1=~s! !  !gr@gme' )
+
+# Fix un-ordered lists to adhere to markdown standards
+markdown=$(echo "$markdown" | perl -0777 -pe \
+  's@^(\s*)(- )@$1* @gm' )
+
+# Fix ordered lists to adhere to markdown standards
+markdown=$(echo "$markdown" | perl -0777 -pe \
+  's@^(\s*)(\d+\. )@${1}1. @gm' )
+
 # clean up markdown
 readonly NBSP='\xC2\xA0'
 markdown=$(echo "$markdown" | \
@@ -225,63 +212,63 @@ markdown=$(echo "$markdown" | \
     sed -r 's|^(#{1,6}.*?) *\{#.*\}$|\1|g' | \
   # convert non-breaking spaces to spaces
     sed -r "s|$NBSP| |g" | \
+  # convert non-breaking spaces to spaces
+    sed -r "s|&nbsp;| |g" | \
   # remove trailing whitespace
     sed -r 's|[[:space:]]*$||g'
   ) || exit_other "unable to clean up markdown with sed"
 
 
-
 # convert wiki admonitions to markdown admonitions...
 
 # Admonitions:
-# When an admonition doesn't have a title, move its first line of
-# content down and out of the place where we expect the title to appear
+# When an admonition begins with content instead of a title,
+# move that content down by 2 lines so that it looks like other admonitions.
 markdown=$(echo "$markdown" | perl -0777 -pe 's@
-    (\x20+-{20,}\x20-{10,})\n
-    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
-        (info|warn|chec|forb)\.png\)
-      )\x20\x20\x20
-    ([^*\\\n]+)\\?\n
-    ((.|\n)*?)
-    (\x20+-{20,}\x20-{10,})
-  @$1\n$2\n    $4\n$5$7@gmx' )
+    (\|\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (information|warning|check|forbidden)\.png\)
+      )\x20\|
+    \x20(?!\*\*)
+  @$1 |\n\n@gmx' )
 
 # Admonitions:
-# Prepare content inside of admonitions.
-# Remove all occurrences of exactly 53 spaces at the beginning of the line
-# and replace with 4 spaces
-markdown=$(echo "$markdown" | perl -0777 -pe 's@^ {53}@    @gm' )
-
-# Admonitions:
-# Convert admonitions to MkDocs syntax, when titles are present
+# Convert first line to markdown syntax when a title is present.
 markdown=$(echo "$markdown" | perl -0777 -pe 's@
-    (\x20+-{20,}\x20-{10,})\n
-    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
-        (info|warn|chec|forb)\.png\)
-      )\x20\x20\x20
-    \*\*([^*]*)\*\*\\\n
-    ((.|\n)*?)
-    (\x20+-{20,}\x20-{10,})
-  @!!! $3 "$4"\n$5@gmx' )
+    (\|\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (information|warning|check|forbidden)\.png\)
+      )\x20\|
+    \x20\*\*([^*]*)\*\*\n
+  @!!! $2 "$3"\n@gmx' )
 
 # Admonitions:
-# Convert admonitions to MkDocs syntax, when titles are NOT present
+# Convert first line to markdown syntax when a title is not present.
 markdown=$(echo "$markdown" | perl -0777 -pe 's@
-    (\x20+-{20,}\x20-{10,})\n
-    (\x20\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
-        (info|warn|chec|forb)\.png\)
-      )
-    ((.|\n)*?)
-    (\x20+-{20,}\x20-{10,})
-  @!!! $3$4@gmx' )
+    (\|\x20\!\[\]\(\/confluence\/images\/icons\/emoticons\/
+        (information|warning|check|forbidden)\.png\)
+      )\x20\|
+  @!!! $2@gmx' )
 
 # Admonitions:
-# change keywords to MkDocs keywords
-markdown=$(echo "$markdown" | \
-  sed -r 's@^!!! info@!!! note@g' | \
-  sed -r 's@^!!! chec@!!! tip@g' | \
-  sed -r 's@^!!! warn@!!! warning@g' | \
-  sed -r 's@^!!! forb@!!! danger@g' )
+# Indent the rest of the lines.
+markdown=$(echo "$markdown" | perl -0777 -pe 's@
+    (^!!!\x20.*$)
+    (
+      ( (?!^\x20\|) (.|\n) )*
+    )
+    (^\x20\|\n)
+  @$a=$1; $b=$2; $b=~s!^!    !gm; $a.$b; @gmxe' )
+
+
+# Admonitions:
+# Use correct names
+markdown=$(echo "$markdown" | perl -0777 -pe 's@(?<=^!!! )information@note@gm' )
+markdown=$(echo "$markdown" | perl -0777 -pe 's@(?<=^!!! )check@tip@gm' )
+markdown=$(echo "$markdown" | perl -0777 -pe 's@(?<=^!!! )warning@warning@gm' )
+markdown=$(echo "$markdown" | perl -0777 -pe 's@(?<=^!!! )forbidden@danger@gm' )
+
+
+# remove trailing whitespace (again)
+markdown=$(echo "$markdown" | sed -r 's|[[:space:]]*$||g' )
 
 
 # Output
