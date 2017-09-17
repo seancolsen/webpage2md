@@ -2,7 +2,8 @@
 
 Converts a web page to markdown
 
-This is basically a fancy wrapper script for `pandoc`, written specifically to
+This is basically a fancy wrapper script for [reverse_markdown](https://github.com/xijo/reverse_markdown),
+written specifically to
 be used by CiviCRM developers as part of the process of
 [transferring wiki content to mkdocs](https://wiki.civicrm.org/confluence/display/CRMDOC/Content+migration+from+wiki+to+Developer+Guide).
 
